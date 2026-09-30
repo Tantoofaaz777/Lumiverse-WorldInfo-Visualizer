@@ -6,6 +6,7 @@ A small Spindle extension for Lumiverse. A draggable floating globe shows the nu
 
 - All extension UI is in English. Lorebook and entry titles remain exactly as saved, in any language.
 - The globe uses the same Lucide Globe icon as Lumiverse's native World Info tab.
+- The floating globe and list use Lumiverse's live theme surfaces, text, borders, and accent colors. The badge uses the theme's contrast color for its number.
 - The badge is hidden before the first observed generation and when there are zero entries. The empty list shows only `?`.
 - Lorebooks are sorted alphabetically. Entries keep their received order inside each book. Books are grouped by ID, so duplicate names stay separate.
 - Entry icons distinguish constants (blue Pin, `Always active`), keywords (green KeyRound, `Keyword`), and vectors (violet Link, `Vector`). Only the icons are colored. Light themes use darker shades of the same colors.

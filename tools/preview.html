@@ -5,11 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>World Info Visualizer · Preview</title>
   <style>
-    :root { color-scheme: dark; --lumiverse-bg-opaque: #1c1826; --lumiverse-bg-hover: #2d283a; --lumiverse-border: #9370db20; --lumiverse-border-hover: #9370db50; --lumiverse-primary: #9370db; --lumiverse-primary-text: #ba87ff; --lumiverse-text: #ffffffe6; --lumiverse-text-muted: #ffffffa6; --lumiverse-text-dim: #ffffff66; --lumiverse-icon: #ffffffe6; --lumiverse-fill-hover: #0003; }
+    /* Match the host: bg-opaque remains a static legacy token. Theme changes
+       update bg/bg-deep and text; custom text need not update icon. */
+    :root { color-scheme: dark; --lumiverse-bg-opaque: #1c1826; --lumiverse-bg: #1c1826; --lumiverse-bg-deep: #121018; --lumiverse-bg-hover: #2d283a; --lumiverse-border: #9370db20; --lumiverse-border-hover: #9370db50; --lumiverse-primary: #9370db; --lumiverse-primary-text: #ba87ff; --lumiverse-primary-contrast: #171022; --lumiverse-text: #ffffffe6; --lumiverse-text-muted: #ffffffa6; --lumiverse-text-dim: #ffffff66; --lumiverse-icon: #ffffffe6; --lumiverse-fill-hover: #0003; }
     * { box-sizing: border-box; }
-    body { margin: 0; font: 14px/1.5 system-ui, sans-serif; color: var(--lumiverse-text); background: #121018; }
-    .light { color-scheme: light; background: #f4f1f9; --lumiverse-bg-opaque: #fff; --lumiverse-bg-hover: #f1ecf9; --lumiverse-text: #252032; --lumiverse-text-muted: #635b71; --lumiverse-text-dim: #857c92; --lumiverse-icon: #453454; --lumiverse-primary: #8056c0; --lumiverse-primary-text: #7344b7; --lumiverse-fill-hover: #8056c012; }
-    .topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 26px; border-bottom: 1px solid var(--lumiverse-border); background: var(--lumiverse-bg-opaque); }
+    body { margin: 0; font: 14px/1.5 system-ui, sans-serif; color: var(--lumiverse-text); background: var(--lumiverse-bg-deep); }
+    .light { color-scheme: light; --lumiverse-bg: #fff; --lumiverse-bg-deep: #f4f1f9; --lumiverse-bg-hover: #f1ecf9; --lumiverse-text: #252032; --lumiverse-text-muted: #635b71; --lumiverse-text-dim: #857c92; --lumiverse-primary: #8056c0; --lumiverse-primary-text: #7344b7; --lumiverse-primary-contrast: #fff; --lumiverse-fill-hover: #8056c012; }
+    .gold { --lumiverse-bg: #211d13; --lumiverse-bg-deep: #151109; --lumiverse-bg-hover: #332b1c; --lumiverse-border: #b78b3226; --lumiverse-border-hover: #b78b3280; --lumiverse-primary: #b78b32; --lumiverse-primary-text: #e5b95c; --lumiverse-primary-contrast: #1c1406; --lumiverse-text: #fff2d5; --lumiverse-text-muted: #c6b694; --lumiverse-text-dim: #8c7d5d; }
+    .gold.light { --lumiverse-bg: #fffdf6; --lumiverse-bg-deep: #fff9e8; --lumiverse-bg-hover: #f3e5c9; --lumiverse-text: #3d2e12; --lumiverse-text-muted: #746346; --lumiverse-text-dim: #978767; --lumiverse-primary: #88651c; --lumiverse-primary-text: #78550c; --lumiverse-primary-contrast: #fff9e8; }
+    .topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 26px; border-bottom: 1px solid var(--lumiverse-border); background: var(--lumiverse-bg); }
     .brand { font-weight: 650; } .tag { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--lumiverse-text-muted); margin-left: 10px; }
     .controls { display: flex; flex-wrap: wrap; gap: 6px; }
     .controls button { color: var(--lumiverse-text); background: transparent; border: 1px solid var(--lumiverse-border-hover); border-radius: 7px; padding: 7px 10px; font: inherit; font-size: 12px; cursor: pointer; }
@@ -18,7 +22,7 @@
     .eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--lumiverse-primary-text); }
     h1 { font-size: clamp(23px, 4vw, 36px); font-weight: 600; letter-spacing: -.025em; margin: 10px 0 14px; }
     .intro { color: var(--lumiverse-text-muted); max-width: 540px; }
-    .message { margin: 30px 0; border: 1px solid var(--lumiverse-border); border-radius: 12px; padding: 20px 24px; background: var(--lumiverse-bg-opaque); }
+    .message { margin: 30px 0; border: 1px solid var(--lumiverse-border); border-radius: 12px; padding: 20px 24px; background: var(--lumiverse-bg); }
     .message strong { display: block; font-size: 12px; color: var(--lumiverse-primary-text); margin-bottom: 8px; }
     .hint { color: var(--lumiverse-text-dim); font-size: 12px; }
     .preview-float { position: fixed; width: 52px; height: 52px; z-index: 9980; contain: layout style; overflow: visible; }
@@ -30,7 +34,7 @@
   <header class="topbar">
     <div><span class="brand">World Info Visualizer</span><span class="tag">Local preview</span></div>
     <nav class="controls" aria-label="Preview controls">
-      <button id="active">Active entries</button><button id="empty">Zero entries</button><button id="new-chat">Switch chat</button><button id="home">Home</button><button id="theme">Toggle theme</button><button id="restart">Reload extension</button>
+      <button id="active">Active entries</button><button id="empty">Zero entries</button><button id="new-chat">Switch chat</button><button id="home">Home</button><button id="theme">Toggle theme</button><button id="palette">Toggle palette</button><button id="restart">Reload extension</button>
     </nav>
   </header>
   <main>
