@@ -3,11 +3,11 @@ import { ActivationModel, entryLabel, groupEntries, entryActivationType, hydrate
 import { activationIcons } from './icons'
 import { styles } from './styles'
 import { watchActiveChat } from './active-chat'
+import { MAX_GLOBE_SIZE, mountSizeSettings } from './size-settings'
 
 // Lumiverse's native World Info tab uses Lucide Globe (24 × 24, stroke width 2).
 const GLOBE = '<svg class="wiv-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>'
 const EVENTS = ['WORLD_INFO_ACTIVATED', 'GENERATION_STARTED', 'STREAM_TOKEN_RECEIVED', 'GENERATION_ENDED', 'GENERATION_STOPPED']
-const SIZE = 52
 const PAD = 12
 
 // Geometry persistence is implemented in the inspected Lumiverse 1.2 host,
@@ -21,15 +21,16 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   let open = false
   let positionFrame = 0
   let syncActiveChat = () => {}
+  let size = MAX_GLOBE_SIZE
   const geometry = ctx.ui.geometry
   const viewport = () => geometry?.layoutViewportSize() ?? { width: window.innerWidth, height: window.innerHeight }
   const layoutPx = (value: number) => geometry?.toLayoutPx(value) ?? value
   const rect = (element: Element) => geometry?.layoutElementRect(element) ?? element.getBoundingClientRect()
 
   const options: FloatOptions = {
-    width: SIZE, height: SIZE, chromeless: true, snapToEdge: false, resizable: false,
+    width: size, height: size, chromeless: true, snapToEdge: false, resizable: false,
     persistGeometry: 'world-info-visualizer-globe',
-    initialPosition: { x: 20, y: Math.max(PAD, viewport().height - SIZE - 24) },
+    initialPosition: { x: 20, y: Math.max(PAD, viewport().height - size - 24) },
     tooltip: 'World Info — drag to move',
   }
   const widget = ctx.ui.createFloatWidget(options)
@@ -82,6 +83,20 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   function schedulePosition() {
     cancelAnimationFrame(positionFrame)
     positionFrame = requestAnimationFrame(positionPanel)
+  }
+
+  function applySize(next: number) {
+    if (disposed) return
+    size = next
+    root.style.setProperty('--wiv-size', `${size}px`)
+    root.style.setProperty('--wiv-globe-size', `${size / 2}px`)
+    root.style.setProperty('--wiv-badge-size', `${Math.max(16, size * 21 / 52)}px`)
+    root.style.setProperty('--wiv-badge-font-size', `${Math.max(9, size * 11 / 52)}px`)
+    widget.setSize(size, size)
+    const view = viewport()
+    const position = widget.getPosition()
+    widget.moveTo(Math.max(PAD, Math.min(position.x, view.width - size - PAD)), Math.max(PAD, Math.min(position.y, view.height - size - PAD)))
+    if (open) schedulePosition()
   }
 
   function setOpen(next: boolean, restoreFocus = false) {
@@ -168,7 +183,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     setOpen(false)
     event.preventDefault()
     const view = viewport()
-    widget.moveTo(Math.max(PAD, Math.min(drag.originX + dx, view.width - SIZE - PAD)), Math.max(PAD, Math.min(drag.originY + dy, view.height - SIZE - PAD)))
+    widget.moveTo(Math.max(PAD, Math.min(drag.originX + dx, view.width - size - PAD)), Math.max(PAD, Math.min(drag.originY + dy, view.height - size - PAD)))
   })
   const endDrag: EventListener = event => {
     const pointer = event as PointerEvent
@@ -220,6 +235,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
 
   try {
     disposers.push(ctx.dom.addStyle(styles))
+    applySize(MAX_GLOBE_SIZE)
+    disposers.push(mountSizeSettings(ctx, applySize))
     const changeChat = (value: unknown) => {
       const chatId = value && typeof value === 'object' ? (value as { chatId?: unknown }).chatId : null
       if (model.switchChat(typeof chatId === 'string' ? chatId : null)) {

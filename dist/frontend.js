@@ -160,11 +160,11 @@ var activationIcons = {
 
 // src/styles.ts
 var styles = `
-.wiv-root { position: relative; width: 52px; height: 52px; color: var(--lumiverse-text, CanvasText); font-family: inherit; --wiv-constant: #60A5FA; --wiv-keyword: #4ADE80; --wiv-vector: #C084FC; }
+.wiv-root { position: relative; width: var(--wiv-size, 52px); height: var(--wiv-size, 52px); color: var(--lumiverse-text, CanvasText); font-family: inherit; --wiv-constant: #60A5FA; --wiv-keyword: #4ADE80; --wiv-vector: #C084FC; }
 [data-theme-mode="light"] .wiv-root { --wiv-constant: #2563EB; --wiv-keyword: #15803D; --wiv-vector: #7C3AED; }
 .wiv-root [hidden] { display: none !important; }
 .wiv-trigger {
-  position: relative; display: grid; place-items: center; width: 52px; height: 52px;
+  position: relative; display: grid; place-items: center; width: var(--wiv-size, 52px); height: var(--wiv-size, 52px);
   box-sizing: border-box; padding: 0; border: 1px solid var(--lumiverse-border-hover, GrayText);
   border-radius: 50%; background: var(--lumiverse-bg, Canvas);
   color: var(--lumiverse-text, CanvasText); box-shadow: var(--lumiverse-shadow-md, 0 8px 24px #0006);
@@ -173,13 +173,13 @@ var styles = `
 .wiv-trigger:hover, .wiv-trigger[aria-expanded="true"] { background: var(--lumiverse-bg-hover, Canvas); border-color: var(--lumiverse-primary, Highlight); }
 .wiv-trigger:focus-visible { outline: 2px solid var(--lumiverse-primary, Highlight); outline-offset: 3px; }
 .wiv-trigger.wiv-dragging { cursor: grabbing; }
-.wiv-icon { display: block; width: 26px; height: 26px; pointer-events: none; }
+.wiv-icon { display: block; width: var(--wiv-globe-size, 26px); height: var(--wiv-globe-size, 26px); pointer-events: none; }
 .wiv-badge {
-  position: absolute; right: -4px; bottom: -2px; min-width: 21px; height: 21px;
+  position: absolute; right: -4px; bottom: -2px; min-width: var(--wiv-badge-size, 21px); height: var(--wiv-badge-size, 21px);
   display: grid; place-items: center; box-sizing: border-box; padding: 0 5px;
   border: 2px solid var(--lumiverse-bg, Canvas); border-radius: 12px;
   background: var(--lumiverse-primary, Highlight); color: var(--lumiverse-primary-contrast, var(--lumiverse-text, HighlightText));
-  font-size: 11px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none;
+  font-size: var(--wiv-badge-font-size, 11px); font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none;
 }
 .wiv-panel {
   position: absolute; z-index: 1; display: flex; flex-direction: column;
@@ -202,6 +202,10 @@ var styles = `
 .wiv-type-keyword { color: var(--wiv-keyword); }
 .wiv-type-vector { color: var(--wiv-vector); }
 .wiv-empty { display: grid; place-items: center; min-height: 80px; color: var(--lumiverse-text-muted, GrayText); font-size: 24px; }
+.wiv-settings { padding: 16px; color: var(--lumiverse-text, CanvasText); background: var(--lumiverse-bg, Canvas); border: 1px solid var(--lumiverse-border, GrayText); border-radius: var(--lumiverse-radius-lg, 12px); }
+.wiv-settings h3 { margin: 0 0 16px; font: inherit; font-weight: 600; }
+.wiv-setting-status { margin: 8px 0 0; color: var(--lumiverse-text-muted, GrayText); font-size: 12px; }
+.wiv-setting-status:empty { display: none; }
 @media (prefers-reduced-motion: reduce) { .wiv-trigger { transition: none; } }
 `;
 
@@ -248,10 +252,109 @@ function watchActiveChat(ctx, change) {
   };
 }
 
+// src/size-settings.ts
+var MIN_GLOBE_SIZE = 32;
+var MAX_GLOBE_SIZE = 52;
+var GLOBE_SIZE_KEY = "ui:globe_size";
+function globeSize(value) {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(MIN_GLOBE_SIZE, Math.min(MAX_GLOBE_SIZE, Math.round(value))) : MAX_GLOBE_SIZE;
+}
+function mountSizeSettings(ctx, applySize) {
+  const settings = ctx.settings;
+  if (!settings || typeof ctx.ui.mount !== "function" || typeof ctx.components?.mountRangeSlider !== "function") {
+    console.warn("[World Info Visualizer] Native size settings are unavailable in this Lumiverse build.");
+    return () => {};
+  }
+  const root = ctx.ui.mount("settings_extensions");
+  root.classList.add("wiv-settings");
+  root.setAttribute("lang", "en");
+  const title = document.createElement("h3");
+  title.textContent = "World Info Visualizer";
+  const target = document.createElement("div");
+  const status = document.createElement("p");
+  status.className = "wiv-setting-status";
+  status.setAttribute("role", "status");
+  root.append(title, target, status);
+  let disposed = false;
+  let revision = 0;
+  let dragging = false;
+  let committed = MAX_GLOBE_SIZE;
+  let pendingWrites = 0;
+  let writes = Promise.resolve();
+  const slider = ctx.components.mountRangeSlider(target, {
+    label: "Floating icon size",
+    hint: "Drag to resize the globe. The original size is 52 px.",
+    min: MIN_GLOBE_SIZE,
+    max: MAX_GLOBE_SIZE,
+    step: 1,
+    integer: true,
+    value: committed,
+    format: { suffix: " px" },
+    onDragValue(value) {
+      if (disposed)
+        return;
+      revision++;
+      dragging = value !== null;
+      applySize(value === null ? committed : globeSize(value));
+    },
+    onCommit(value) {
+      if (disposed)
+        return;
+      const size = globeSize(value);
+      const writeRevision = ++revision;
+      dragging = false;
+      committed = size;
+      applySize(size);
+      pendingWrites++;
+      status.textContent = "Saving…";
+      writes = writes.then(async () => {
+        if (disposed)
+          return;
+        try {
+          await settings.set(GLOBE_SIZE_KEY, size);
+          if (!disposed && revision === writeRevision)
+            status.textContent = "";
+        } catch (error) {
+          if (!disposed && revision === writeRevision)
+            status.textContent = "Could not save icon size. Try again.";
+          console.warn("[World Info Visualizer] Could not save icon size:", error);
+        }
+      }).finally(() => {
+        pendingWrites--;
+      });
+    }
+  });
+  const receive = (value) => {
+    committed = globeSize(value);
+    applySize(committed);
+    slider.update({ value: committed });
+  };
+  const unwatch = settings.watch(GLOBE_SIZE_KEY, (value) => {
+    if (disposed || dragging || pendingWrites)
+      return;
+    revision++;
+    receive(value);
+  });
+  const readRevision = revision;
+  settings.get(GLOBE_SIZE_KEY).then((value) => {
+    if (!disposed && revision === readRevision)
+      receive(value);
+  }).catch((error) => {
+    if (!disposed && revision === readRevision)
+      status.textContent = "Could not load saved icon size. Using the default size.";
+    console.warn("[World Info Visualizer] Could not load icon size:", error);
+  });
+  return () => {
+    disposed = true;
+    unwatch();
+    slider.destroy();
+    root.replaceChildren();
+  };
+}
+
 // src/frontend.ts
 var GLOBE = '<svg class="wiv-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>';
 var EVENTS = ["WORLD_INFO_ACTIVATED", "GENERATION_STARTED", "STREAM_TOKEN_RECEIVED", "GENERATION_ENDED", "GENERATION_STOPPED"];
-var SIZE = 52;
 var PAD = 12;
 function setup(ctx) {
   const model = new ActivationModel;
@@ -260,18 +363,19 @@ function setup(ctx) {
   let open = false;
   let positionFrame = 0;
   let syncActiveChat = () => {};
+  let size = MAX_GLOBE_SIZE;
   const geometry = ctx.ui.geometry;
   const viewport = () => geometry?.layoutViewportSize() ?? { width: window.innerWidth, height: window.innerHeight };
   const layoutPx = (value) => geometry?.toLayoutPx(value) ?? value;
   const rect = (element) => geometry?.layoutElementRect(element) ?? element.getBoundingClientRect();
   const options = {
-    width: SIZE,
-    height: SIZE,
+    width: size,
+    height: size,
     chromeless: true,
     snapToEdge: false,
     resizable: false,
     persistGeometry: "world-info-visualizer-globe",
-    initialPosition: { x: 20, y: Math.max(PAD, viewport().height - SIZE - 24) },
+    initialPosition: { x: 20, y: Math.max(PAD, viewport().height - size - 24) },
     tooltip: "World Info — drag to move"
   };
   const widget = ctx.ui.createFloatWidget(options);
@@ -320,6 +424,21 @@ function setup(ctx) {
   function schedulePosition() {
     cancelAnimationFrame(positionFrame);
     positionFrame = requestAnimationFrame(positionPanel);
+  }
+  function applySize(next) {
+    if (disposed)
+      return;
+    size = next;
+    root.style.setProperty("--wiv-size", `${size}px`);
+    root.style.setProperty("--wiv-globe-size", `${size / 2}px`);
+    root.style.setProperty("--wiv-badge-size", `${Math.max(16, size * 21 / 52)}px`);
+    root.style.setProperty("--wiv-badge-font-size", `${Math.max(9, size * 11 / 52)}px`);
+    widget.setSize(size, size);
+    const view = viewport();
+    const position = widget.getPosition();
+    widget.moveTo(Math.max(PAD, Math.min(position.x, view.width - size - PAD)), Math.max(PAD, Math.min(position.y, view.height - size - PAD)));
+    if (open)
+      schedulePosition();
   }
   function setOpen(next, restoreFocus = false) {
     open = next && model.chatId !== null;
@@ -407,7 +526,7 @@ function setup(ctx) {
     setOpen(false);
     event.preventDefault();
     const view = viewport();
-    widget.moveTo(Math.max(PAD, Math.min(drag.originX + dx, view.width - SIZE - PAD)), Math.max(PAD, Math.min(drag.originY + dy, view.height - SIZE - PAD)));
+    widget.moveTo(Math.max(PAD, Math.min(drag.originX + dx, view.width - size - PAD)), Math.max(PAD, Math.min(drag.originY + dy, view.height - size - PAD)));
   });
   const endDrag = (event) => {
     const pointer = event;
@@ -465,6 +584,8 @@ function setup(ctx) {
   };
   try {
     disposers.push(ctx.dom.addStyle(styles));
+    applySize(MAX_GLOBE_SIZE);
+    disposers.push(mountSizeSettings(ctx, applySize));
     const changeChat = (value) => {
       const chatId = value && typeof value === "object" ? value.chatId : null;
       if (model.switchChat(typeof chatId === "string" ? chatId : null)) {

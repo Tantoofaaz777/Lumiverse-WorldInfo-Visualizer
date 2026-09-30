@@ -95,6 +95,9 @@ const ctx = {
       document.body.append(container)
       return {
         root, widgetId: 'preview-globe', getPosition: () => position, moveTo,
+        setSize: (width: number, height: number) => {
+          Object.assign(container.style, { width: `${width}px`, height: `${height}px` })
+        },
         setVisible: (visible: boolean) => { container.hidden = !visible },
         destroy: () => { window.removeEventListener('resize', resize); container.remove() },
       }

@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { Window } from 'happy-dom'
-import type { SpindleFrontendContext } from 'lumiverse-spindle-types'
+import type { SpindleFrontendContext, SpindleRangeSliderOptions } from 'lumiverse-spindle-types'
 import { setup } from '../src/frontend'
+import { GLOBE_SIZE_KEY } from '../src/size-settings'
 
 let window: Window
 let cleanup: (() => void) | undefined
@@ -14,6 +15,13 @@ let destroyed: number
 let root: HTMLElement
 let fetchBookEntries: (bookId: string) => Promise<readonly unknown[]>
 let hostContext: SpindleFrontendContext
+let dimensions: { width: number; height: number }
+let settingsRoot: HTMLElement
+let sliderOptions: SpindleRangeSliderOptions
+let sliderDestroyed: number
+let settingsListeners: Set<(value: unknown) => void>
+let savedSizes: Array<{ key: string; value: unknown }>
+let readSize: () => Promise<unknown>
 
 function emit(event: string, payload: unknown) {
   for (const listener of events.get(event) ?? []) listener(payload)
@@ -44,6 +52,13 @@ beforeEach(() => {
   visibility = true
   destroyed = 0
   fetchBookEntries = async () => []
+  dimensions = { width: 52, height: 52 }
+  settingsRoot = window.document.createElement('div') as unknown as HTMLElement
+  window.document.body.append(settingsRoot as unknown as Parameters<typeof window.document.body.append>[0])
+  sliderDestroyed = 0
+  settingsListeners = new Set()
+  savedSizes = []
+  readSize = async () => undefined
   const ctx = {
     getActiveChat: () => ({ chatId, characterId: null }),
     state: {
@@ -59,13 +74,35 @@ beforeEach(() => {
       return () => { events.get(name)!.delete(listener) }
     } },
     worldBooks: { entries: (bookId: string) => fetchBookEntries(bookId) },
+    settings: {
+      get: () => readSize(),
+      set: async (key: string, value: unknown) => {
+        savedSizes.push({ key, value })
+        for (const listener of settingsListeners) listener(value)
+      },
+      watch: (_key: string, listener: (value: unknown) => void) => {
+        settingsListeners.add(listener)
+        return () => { settingsListeners.delete(listener) }
+      },
+    },
+    components: { mountRangeSlider: (_target: Element, options: SpindleRangeSliderOptions) => {
+      sliderOptions = options
+      return {
+        update: (next: Partial<SpindleRangeSliderOptions>) => { Object.assign(sliderOptions, next) },
+        destroy: () => { sliderDestroyed++ },
+      }
+    } },
     dom: { addStyle: (css: string) => {
       const style = window.document.createElement('style')
       style.textContent = css
       window.document.head.append(style)
       return () => style.remove()
     } },
-    ui: { geometry: {
+    ui: { mount: (point: string) => {
+      expect(point).toBe('settings_extensions')
+      settingsRoot.replaceChildren()
+      return settingsRoot
+    }, geometry: {
       layoutViewportSize: () => ({ width: 900, height: 650 }),
       toLayoutPx: (value: number) => value,
       layoutElementRect: (element: Element) => {
@@ -76,6 +113,7 @@ beforeEach(() => {
       root, widgetId: 'test-widget',
       getPosition: () => position,
       moveTo: (x: number, y: number) => { position = { x, y } },
+      setSize: (width: number, height: number) => { dimensions = { width, height } },
       setVisible: (value: boolean) => { visibility = value },
       destroy: () => { destroyed++; root.remove() },
     }) },
@@ -87,6 +125,73 @@ beforeEach(() => {
 afterEach(() => { cleanup?.(); cleanup = undefined; window.close() })
 
 describe('frontend behavior with a Spindle host double', () => {
+  test('native slider resizes live and saves only on commit', async () => {
+    await Bun.sleep(1)
+    expect(sliderOptions.min).toBe(32)
+    expect(sliderOptions.max).toBe(52)
+    expect(sliderOptions.label).toBe('Floating icon size')
+    sliderOptions.onDragValue!(32)
+    expect(dimensions).toEqual({ width: 32, height: 32 })
+    expect(root.style.getPropertyValue('--wiv-globe-size')).toBe('16px')
+    expect(savedSizes).toHaveLength(0)
+    sliderOptions.onCommit!(32)
+    await Bun.sleep(1)
+    expect(savedSizes).toEqual([{ key: GLOBE_SIZE_KEY, value: 32 }])
+    sliderOptions.onDragValue!(44)
+    sliderOptions.onDragValue!(null)
+    expect(dimensions.width).toBe(32)
+  })
+  test('restores saved size and clamps remote changes while keeping the globe onscreen', async () => {
+    cleanup!()
+    window.document.body.append(root as unknown as Parameters<typeof window.document.body.append>[0])
+    readSize = async () => 40
+    cleanup = setup(hostContext)
+    await Bun.sleep(1)
+    expect(dimensions.width).toBe(40)
+    expect(sliderOptions.value).toBe(40)
+    position = { x: 880, y: 640 }
+    for (const listener of settingsListeners) listener(500)
+    expect(dimensions.width).toBe(52)
+    expect(position).toEqual({ x: 836, y: 586 })
+    for (const listener of settingsListeners) listener(1)
+    expect(dimensions.width).toBe(32)
+    for (const listener of settingsListeners) listener('broken')
+    expect(dimensions.width).toBe(52)
+  })
+  test('a late settings read cannot undo a user change or touch a destroyed widget', async () => {
+    cleanup!()
+    window.document.body.append(root as unknown as Parameters<typeof window.document.body.append>[0])
+    let resolveRead!: (value: unknown) => void
+    readSize = () => new Promise(resolve => { resolveRead = resolve })
+    cleanup = setup(hostContext)
+    sliderOptions.onCommit!(36)
+    resolveRead(48)
+    await Bun.sleep(1)
+    expect(dimensions.width).toBe(36)
+    cleanup!()
+    const savedCount = savedSizes.length
+    sliderOptions.onCommit!(52)
+    expect(savedSizes).toHaveLength(savedCount)
+    expect(settingsListeners.size).toBe(0)
+    expect(settingsRoot.children).toHaveLength(0)
+  })
+  test('queued saves preserve the last committed size', async () => {
+    await Bun.sleep(1)
+    let release!: () => void
+    const firstWrite = new Promise<void>(resolve => { release = resolve })
+    hostContext.settings!.set = async (_key, value) => {
+      savedSizes.push({ key: GLOBE_SIZE_KEY, value })
+      if (value === 32) await firstWrite
+    }
+    sliderOptions.onCommit!(32)
+    sliderOptions.onCommit!(44)
+    await Bun.sleep(1)
+    expect(savedSizes.map(row => row.value)).toEqual([32])
+    release()
+    await Bun.sleep(1)
+    expect(savedSizes.map(row => row.value)).toEqual([32, 44])
+    expect(dimensions.width).toBe(44)
+  })
   test('an unwired selector authority map falls back to the shipped active-chat API', async () => {
     cleanup!()
     window.document.body.append(root as unknown as Parameters<typeof window.document.body.append>[0])
@@ -249,6 +354,8 @@ describe('frontend behavior with a Spindle host double', () => {
     cleanup!()
     expect(destroyed).toBe(1)
     expect(chatListeners.size).toBe(0)
+    expect(sliderDestroyed).toBe(1)
+    expect(settingsListeners.size).toBe(0)
     expect([...events.values()].every(listeners => listeners.size === 0)).toBe(true)
     expect(window.document.querySelector('style')).toBeNull()
     expect(root.children).toHaveLength(0)

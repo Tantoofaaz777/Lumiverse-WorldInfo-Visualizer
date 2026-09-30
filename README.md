@@ -14,6 +14,7 @@ A small Spindle extension for Lumiverse. A draggable floating globe shows the nu
 - Untitled entries show `Untitled entry (ID)`. Missing book metadata has an English fallback.
 - The panel starts directly with the lorebook groups, without a title bar or close button. Click the globe again, click outside, or press Escape to dismiss the list.
 - Drag the globe to move it. Spindle saves its position. The list wraps long names and scrolls on small screens.
+- Use the extension's **Configure** action, or **Settings → Extensions → World Info Visualizer**, to adjust **Floating icon size** with Lumiverse's native slider. The range is 32–52 px, with 52 px as the default and maximum. The globe and badge scale together while dragging; the host saves the size when you release the slider and restores it on reload.
 - Switching chats closes and clears the list. The globe is hidden on the home screen.
 
 ## Generation data
@@ -81,6 +82,7 @@ powershell -NoProfile -File tools/package.ps1
 - `src/frontend.ts`: Spindle setup, widget, list, drag, dismissal, and teardown.
 - `src/model.ts`: generation observation, exact labels, and lorebook grouping.
 - `src/active-chat.ts`: chat subscriptions and staging compatibility.
+- `src/size-settings.ts`: native size slider and extension-private preference persistence.
 - `src/icons.ts`: Lucide activation icons and English tooltips.
 - `src/styles.ts`: theme-aware styles scoped by extension class names.
 - `tests/`: generation and frontend behavior tests.
