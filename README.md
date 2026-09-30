@@ -27,7 +27,7 @@ After loading/reloading the extension, refreshing the application, or switching 
 
 ## Requirements and permissions
 
-- Lumiverse 1.2.0 or a compatible newer host with `chat.active` state selectors and persistent floating widgets.
+- Lumiverse 1.2.0 or a compatible newer host with persistent floating widgets and an active-chat API.
 - `ui_panels`: creates the host-managed floating widget.
 - `generation`: observes generation lifecycle events for the zero-entry fallback. It does not start generations.
 - Bun for rebuilding or running the local preview. The compiled bundle has no runtime dependencies and does not require React.
@@ -40,6 +40,8 @@ After loading/reloading the extension, refreshing the application, or switching 
 4. Open a chat and generate a response. The globe will update when the actual activation event arrives.
 
 The repository includes the compiled `dist/frontend.js`. The manifest disables `dev_mode`, so Spindle can fetch updates from GitHub. This initial release has passed automated tests and a local preview; testing in a running Lumiverse instance is still pending.
+
+On staging builds whose `chat.active` selector reports `spindle_authority_map_unwired`, the extension uses the shipped `ctx.getActiveChat()` API instead. It checks for chat changes every 250 ms and immediately before processing generation events or opening the list. No additional permissions are requested. Hosts with working selectors use their normal subscription.
 
 ## Install a local development copy
 
@@ -65,6 +67,8 @@ bun run preview
 
 The preview is served only on `http://127.0.0.1:4318`. Its sample controls exercise active entries, missing zero-entry events, chat changes, home visibility, theme changes, and reloading. Add `?scene=long` to inspect a long scrollable list. This is a host simulation, not a test inside a running Lumiverse instance.
 
+Use `?scene=active&state=unwired` to reproduce the staging selector error and exercise the compatibility path.
+
 Create a local installation ZIP after building:
 
 ```powershell
@@ -75,6 +79,7 @@ powershell -NoProfile -File tools/package.ps1
 
 - `src/frontend.ts`: Spindle setup, widget, list, drag, dismissal, and teardown.
 - `src/model.ts`: generation observation, exact labels, and lorebook grouping.
+- `src/active-chat.ts`: chat subscriptions and staging compatibility.
 - `src/icons.ts`: Lucide activation icons and English tooltips.
 - `src/styles.ts`: theme-aware styles scoped by extension class names.
 - `tests/`: generation and frontend behavior tests.

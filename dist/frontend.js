@@ -205,19 +205,61 @@ var styles = `
 @media (prefers-reduced-motion: reduce) { .wiv-trigger { transition: none; } }
 `;
 
+// src/active-chat.ts
+function watchActiveChat(ctx, change) {
+  let active = true;
+  const publish = (value) => {
+    if (active)
+      change(value);
+  };
+  if (ctx.state && typeof ctx.state.get === "function" && typeof ctx.state.subscribe === "function") {
+    try {
+      const initial = ctx.state.get("chat.active");
+      const unsubscribe = ctx.state.subscribe("chat.active", publish);
+      publish(initial);
+      return {
+        sync: () => {},
+        dispose: () => {
+          active = false;
+          unsubscribe();
+        }
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes("PERMISSION_DENIED:spindle_authority_map_unwired") && !message.includes("SELECTOR_UNKNOWN:chat.active"))
+        throw error;
+    }
+  }
+  if (typeof ctx.getActiveChat !== "function") {
+    throw new Error("World Info Visualizer requires an active-chat API from Lumiverse.");
+  }
+  const sync = () => {
+    if (active)
+      publish(ctx.getActiveChat());
+  };
+  sync();
+  const timer = window.setInterval(sync, 250);
+  return {
+    sync,
+    dispose: () => {
+      active = false;
+      window.clearInterval(timer);
+    }
+  };
+}
+
 // src/frontend.ts
 var GLOBE = '<svg class="wiv-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>';
 var EVENTS = ["WORLD_INFO_ACTIVATED", "GENERATION_STARTED", "STREAM_TOKEN_RECEIVED", "GENERATION_ENDED", "GENERATION_STOPPED"];
 var SIZE = 52;
 var PAD = 12;
 function setup(ctx) {
-  if (!ctx.state)
-    throw new Error("World Info Visualizer requires Lumiverse state selectors.");
   const model = new ActivationModel;
   const disposers = [];
   let disposed = false;
   let open = false;
   let positionFrame = 0;
+  let syncActiveChat = () => {};
   const geometry = ctx.ui.geometry;
   const viewport = () => geometry?.layoutViewportSize() ?? { width: window.innerWidth, height: window.innerHeight };
   const layoutPx = (value) => geometry?.toLayoutPx(value) ?? value;
@@ -271,7 +313,7 @@ function setup(ctx) {
     const size = rect(panel);
     const x = Math.max(PAD, Math.min(anchor.x, view.width - size.width - PAD));
     const preferredY = anchor.y - size.height - 12;
-    const y = Math.max(PAD, Math.min(preferredY >= PAD ? preferredY : anchor.bottom + 12, view.height - size.height - PAD));
+    const y = Math.max(PAD, Math.min(preferredY >= PAD ? preferredY : anchor.y + anchor.height + 12, view.height - size.height - PAD));
     panel.style.left = `${x - anchor.x}px`;
     panel.style.top = `${y - anchor.y}px`;
   }
@@ -386,6 +428,7 @@ function setup(ctx) {
     event.stopPropagation();
     if (event.detail > 0 && Date.now() < suppressClickUntil)
       return;
+    syncActiveChat();
     setOpen(!open);
   });
   listen(panel, "pointerdown", (event) => event.stopPropagation());
@@ -429,11 +472,15 @@ function setup(ctx) {
         render();
       }
     };
-    changeChat(ctx.state.get("chat.active"));
-    disposers.push(ctx.state.subscribe("chat.active", changeChat));
+    const activeChat = watchActiveChat(ctx, changeChat);
+    syncActiveChat = activeChat.sync;
+    disposers.push(activeChat.dispose);
     for (const event of EVENTS) {
       disposers.push(ctx.events.on(event, (payload) => {
-        if (disposed || !model.event(event, payload))
+        if (disposed)
+          return;
+        syncActiveChat();
+        if (!model.event(event, payload))
           return;
         render();
         const entriesApi = ctx.worldBooks?.entries;

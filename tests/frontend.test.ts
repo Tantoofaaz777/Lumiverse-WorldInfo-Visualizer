@@ -13,6 +13,7 @@ let visibility: boolean
 let destroyed: number
 let root: HTMLElement
 let fetchBookEntries: (bookId: string) => Promise<readonly unknown[]>
+let hostContext: SpindleFrontendContext
 
 function emit(event: string, payload: unknown) {
   for (const listener of events.get(event) ?? []) listener(payload)
@@ -44,6 +45,7 @@ beforeEach(() => {
   destroyed = 0
   fetchBookEntries = async () => []
   const ctx = {
+    getActiveChat: () => ({ chatId, characterId: null }),
     state: {
       get: () => ({ chatId }),
       subscribe: (_selector: string, listener: (payload: unknown) => void) => {
@@ -63,7 +65,14 @@ beforeEach(() => {
       window.document.head.append(style)
       return () => style.remove()
     } },
-    ui: { createFloatWidget: () => ({
+    ui: { geometry: {
+      layoutViewportSize: () => ({ width: 900, height: 650 }),
+      toLayoutPx: (value: number) => value,
+      layoutElementRect: (element: Element) => {
+        const { x, y, width, height } = element.getBoundingClientRect()
+        return { x, y, width, height }
+      },
+    }, createFloatWidget: () => ({
       root, widgetId: 'test-widget',
       getPosition: () => position,
       moveTo: (x: number, y: number) => { position = { x, y } },
@@ -71,12 +80,56 @@ beforeEach(() => {
       destroy: () => { destroyed++; root.remove() },
     }) },
   } as unknown as SpindleFrontendContext
+  hostContext = ctx
   cleanup = setup(ctx)
 })
 
 afterEach(() => { cleanup?.(); cleanup = undefined; window.close() })
 
 describe('frontend behavior with a Spindle host double', () => {
+  test('an unwired selector authority map falls back to the shipped active-chat API', async () => {
+    cleanup!()
+    window.document.body.append(root as unknown as Parameters<typeof window.document.body.append>[0])
+    hostContext.state!.get = () => { throw new Error('PERMISSION_DENIED:spindle_authority_map_unwired — chat.active requires the spindle_authority_map_unwired permission') }
+    cleanup = setup(hostContext)
+    expect(visibility).toBe(true)
+    emit('WORLD_INFO_ACTIVATED', { chatId, entries })
+    ;(root.querySelector('button') as HTMLButtonElement).click()
+    chatId = 'chat-b'
+    await Bun.sleep(300)
+    expect(root.querySelectorAll('.wiv-entry')).toHaveLength(0)
+    expect((root.querySelector('.wiv-panel') as HTMLElement).hidden).toBe(true)
+    chatId = null
+    await Bun.sleep(300)
+    expect(visibility).toBe(false)
+    cleanup!()
+    chatId = 'chat-c'
+    await Bun.sleep(300)
+    expect(visibility).toBe(false)
+  })
+  test('fallback synchronizes the chat before a generation event or globe click', () => {
+    cleanup!()
+    window.document.body.append(root as unknown as Parameters<typeof window.document.body.append>[0])
+    hostContext.state = undefined
+    cleanup = setup(hostContext)
+    emit('WORLD_INFO_ACTIVATED', { chatId, entries })
+    chatId = 'chat-b'
+    emit('WORLD_INFO_ACTIVATED', { chatId: 'chat-a', entries })
+    expect(root.querySelectorAll('.wiv-entry')).toHaveLength(0)
+    emit('WORLD_INFO_ACTIVATED', { chatId, entries })
+    expect(root.querySelectorAll('.wiv-entry')).toHaveLength(3)
+    chatId = 'chat-c'
+    ;(root.querySelector('button') as HTMLButtonElement).click()
+    expect(root.querySelectorAll('.wiv-entry')).toHaveLength(0)
+  })
+  test('an actual permission denial still stops setup and cleans up', () => {
+    cleanup!()
+    window.document.body.append(root as unknown as Parameters<typeof window.document.body.append>[0])
+    hostContext.state!.get = () => { throw new Error('PERMISSION_DENIED:chats') }
+    expect(() => setup(hostContext)).toThrow('PERMISSION_DENIED:chats')
+    expect(root.children).toHaveLength(0)
+    expect(window.document.querySelector('style')).toBeNull()
+  })
   test('distinct icons and English tooltips preserve the original entry names', () => {
     emit('WORLD_INFO_ACTIVATED', { chatId, entries: entries.map((entry, index) => ({ ...entry, activationType: ['constant', 'keyword', 'vector'][index] })) })
     const rows = [...root.querySelectorAll('.wiv-entry')]
@@ -148,6 +201,15 @@ describe('frontend behavior with a Spindle host double', () => {
     window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     expect(panel.hidden).toBe(true)
     expect(window.document.activeElement).toBe(button as unknown as typeof window.document.activeElement)
+  })
+  test('positions below a globe near the top using the host geometry shape', () => {
+    const button = root.querySelector('button') as HTMLButtonElement
+    const panel = root.querySelector('.wiv-panel') as HTMLElement
+    button.getBoundingClientRect = () => new window.DOMRect(20, 20, 52, 52) as unknown as DOMRect
+    panel.getBoundingClientRect = () => new window.DOMRect(0, 0, 340, 300) as unknown as DOMRect
+    button.click()
+    expect(panel.style.top).toBe('64px')
+    expect(panel.style.left).toBe('0px')
   })
   test('zero entries clear a stale badge without recalculating lorebook activation', () => {
     emit('WORLD_INFO_ACTIVATED', { chatId, entries })

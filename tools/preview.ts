@@ -38,8 +38,14 @@ function generate(rows: unknown[]) {
 }
 
 const ctx = {
+  getActiveChat: () => ({ chatId, characterId: null }),
   state: {
-    get: () => ({ chatId }),
+    get: () => {
+      if (new URLSearchParams(location.search).get('state') === 'unwired') {
+        throw new Error('PERMISSION_DENIED:spindle_authority_map_unwired — chat.active')
+      }
+      return { chatId }
+    },
     subscribe: (_selector: string, handler: (value: unknown) => void) => {
       chatListeners.add(handler)
       return () => { chatListeners.delete(handler) }
@@ -63,7 +69,10 @@ const ctx = {
       getUiScale: () => 1,
       toLayoutPx: (value: number) => value,
       layoutViewportSize: () => ({ width: innerWidth, height: innerHeight }),
-      layoutElementRect: (element: Element) => element.getBoundingClientRect(),
+      layoutElementRect: (element: Element) => {
+        const { x, y, width, height } = element.getBoundingClientRect()
+        return { x, y, width, height }
+      },
     },
     createFloatWidget: (options: SpindleFloatWidgetOptions) => {
       const container = document.createElement('div')

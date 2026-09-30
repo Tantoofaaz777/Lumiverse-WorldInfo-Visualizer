@@ -2,6 +2,7 @@ import type { SpindleFrontendContext, SpindleFloatWidgetOptions } from 'lumivers
 import { ActivationModel, entryLabel, groupEntries, entryActivationType, hydrateActivationTypes } from './model'
 import { activationIcons } from './icons'
 import { styles } from './styles'
+import { watchActiveChat } from './active-chat'
 
 // Lumiverse's native World Info tab uses Lucide Globe (24 × 24, stroke width 2).
 const GLOBE = '<svg class="wiv-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>'
@@ -14,12 +15,12 @@ const PAD = 12
 type FloatOptions = SpindleFloatWidgetOptions & { persistGeometry: string; resizable: false }
 
 export function setup(ctx: SpindleFrontendContext): () => void {
-  if (!ctx.state) throw new Error('World Info Visualizer requires Lumiverse state selectors.')
   const model = new ActivationModel()
   const disposers: Array<() => void> = []
   let disposed = false
   let open = false
   let positionFrame = 0
+  let syncActiveChat = () => {}
   const geometry = ctx.ui.geometry
   const viewport = () => geometry?.layoutViewportSize() ?? { width: window.innerWidth, height: window.innerHeight }
   const layoutPx = (value: number) => geometry?.toLayoutPx(value) ?? value
@@ -73,7 +74,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     const size = rect(panel)
     const x = Math.max(PAD, Math.min(anchor.x, view.width - size.width - PAD))
     const preferredY = anchor.y - size.height - 12
-    const y = Math.max(PAD, Math.min(preferredY >= PAD ? preferredY : anchor.bottom + 12, view.height - size.height - PAD))
+    const y = Math.max(PAD, Math.min(preferredY >= PAD ? preferredY : anchor.y + anchor.height + 12, view.height - size.height - PAD))
     panel.style.left = `${x - anchor.x}px`
     panel.style.top = `${y - anchor.y}px`
   }
@@ -184,6 +185,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   listen(button, 'click', event => {
     event.stopPropagation()
     if ((event as MouseEvent).detail > 0 && Date.now() < suppressClickUntil) return
+    syncActiveChat()
     setOpen(!open)
   })
   listen(panel, 'pointerdown', event => event.stopPropagation())
@@ -225,11 +227,14 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         render()
       }
     }
-    changeChat(ctx.state.get('chat.active'))
-    disposers.push(ctx.state.subscribe('chat.active', changeChat))
+    const activeChat = watchActiveChat(ctx, changeChat)
+    syncActiveChat = activeChat.sync
+    disposers.push(activeChat.dispose)
     for (const event of EVENTS) {
       disposers.push(ctx.events.on(event, payload => {
-        if (disposed || !model.event(event, payload)) return
+        if (disposed) return
+        syncActiveChat()
+        if (!model.event(event, payload)) return
         render()
         // The inspected host provides a read-only entries(bookId) function;
         // SDK 0.6.31 still types this member as the older CRUD helper object.
