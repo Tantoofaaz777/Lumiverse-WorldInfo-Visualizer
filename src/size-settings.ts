@@ -25,6 +25,9 @@ export function mountSizeSettings(ctx: SpindleFrontendContext, applySize: (size:
   const status = document.createElement('p')
   status.className = 'wiv-setting-status'
   status.setAttribute('role', 'status')
+  const sizeField = document.createElement('div')
+  sizeField.className = 'wiv-size-setting'
+  sizeField.append(target, status)
   root.append(title)
 
   let disposed = false
@@ -69,12 +72,13 @@ export function mountSizeSettings(ctx: SpindleFrontendContext, applySize: (size:
   })
   const disposePlacement = mountPlacementSettings(ctx, root, placement => {
     topBar = placement === 'top_bar'
+    sizeField.hidden = topBar
     dragging = false
     applySize(committed)
     slider.update({ disabled: topBar })
     applyPlacement(placement)
   })
-  root.append(target, status)
+  root.append(sizeField)
   const receive = (value: unknown) => {
     committed = globeSize(value)
     applySize(committed)

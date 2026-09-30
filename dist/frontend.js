@@ -206,9 +206,10 @@ var styles = `
 .wiv-settings h3 { margin: 0 0 16px; font: inherit; font-weight: 600; }
 .wiv-setting-status { margin: 8px 0 0; color: var(--lumiverse-text-muted, GrayText); font-size: 12px; }
 .wiv-setting-status:empty { display: none; }
+.wiv-size-setting[hidden] { display: none !important; }
 .wiv-placement-setting { margin-bottom: 16px; }
 .wiv-setting-label { margin-bottom: 8px; font-size: calc(13px * var(--lumiverse-font-scale, 1)); }
-.wiv-root.wiv-toolbar { display: inline-flex !important; align-items: center; width: auto !important; height: 28px; min-width: 0 !important; flex: 0 0 auto !important; order: 2; --wiv-size: 28px; --wiv-globe-size: 14px; --wiv-badge-size: 14px; --wiv-badge-font-size: 9px; }
+.wiv-root.wiv-toolbar { display: inline-flex !important; align-items: center; width: auto !important; height: 28px; min-width: 0 !important; flex: 0 0 auto !important; order: -1; --wiv-size: 28px; --wiv-globe-size: 14px; --wiv-badge-size: 14px; --wiv-badge-font-size: 9px; }
 .wiv-root.wiv-toolbar[hidden] { display: none !important; }
 .wiv-toolbar .wiv-trigger { border-radius: 6px; background: transparent; border-color: transparent; box-shadow: none; color: var(--lumiverse-text-muted, GrayText); touch-action: auto; }
 .wiv-toolbar .wiv-trigger:hover, .wiv-toolbar .wiv-trigger[aria-expanded="true"] { background: var(--lumiverse-bg-hover, Canvas); color: var(--lumiverse-primary, Highlight); }
@@ -362,6 +363,9 @@ function mountSizeSettings(ctx, applySize, applyPlacement) {
   const status = document.createElement("p");
   status.className = "wiv-setting-status";
   status.setAttribute("role", "status");
+  const sizeField = document.createElement("div");
+  sizeField.className = "wiv-size-setting";
+  sizeField.append(target, status);
   root.append(title);
   let disposed = false;
   let revision = 0;
@@ -415,12 +419,13 @@ function mountSizeSettings(ctx, applySize, applyPlacement) {
   });
   const disposePlacement = mountPlacementSettings(ctx, root, (placement) => {
     topBar = placement === "top_bar";
+    sizeField.hidden = topBar;
     dragging = false;
     applySize(committed);
     slider.update({ disabled: topBar });
     applyPlacement(placement);
   });
-  root.append(target, status);
+  root.append(sizeField);
   const receive = (value) => {
     committed = globeSize(value);
     applySize(committed);
