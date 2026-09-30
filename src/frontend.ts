@@ -1,9 +1,10 @@
-import type { SpindleFrontendContext, SpindleFloatWidgetOptions } from 'lumiverse-spindle-types'
+import type { SpindleFrontendContext, SpindleFloatWidgetOptions, SpindleFloatWidgetHandle } from 'lumiverse-spindle-types'
 import { ActivationModel, entryLabel, groupEntries, entryActivationType, hydrateActivationTypes } from './model'
 import { activationIcons } from './icons'
 import { styles } from './styles'
 import { watchActiveChat } from './active-chat'
 import { MAX_GLOBE_SIZE, mountSizeSettings } from './size-settings'
+import type { IconPlacement } from './placement-settings'
 
 // Lumiverse's native World Info tab uses Lucide Globe (24 × 24, stroke width 2).
 const GLOBE = '<svg class="wiv-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>'
@@ -12,7 +13,7 @@ const PAD = 12
 
 // Geometry persistence is implemented in the inspected Lumiverse 1.2 host,
 // but these two additive options are not yet present in SDK 0.6.31's type.
-type FloatOptions = SpindleFloatWidgetOptions & { persistGeometry: string; resizable: false }
+type FloatOptions = SpindleFloatWidgetOptions & { persistGeometry: string | false; resizable: false }
 
 export function setup(ctx: SpindleFrontendContext): () => void {
   const model = new ActivationModel()
@@ -22,6 +23,10 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   let positionFrame = 0
   let syncActiveChat = () => {}
   let size = MAX_GLOBE_SIZE
+  let placement: IconPlacement = 'floating'
+  let toolbarRoot: HTMLElement | null = null
+  let popup: SpindleFloatWidgetHandle | null = null
+  let popupRect = ''
   const geometry = ctx.ui.geometry
   const viewport = () => geometry?.layoutViewportSize() ?? { width: window.innerWidth, height: window.innerHeight }
   const layoutPx = (value: number) => geometry?.toLayoutPx(value) ?? value
@@ -67,17 +72,42 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }
 
   function positionPanel() {
-    if (disposed || !open || !button.isConnected) return
+    if (disposed || !open) return
+    if (!button.isConnected) { setOpen(false); return }
     const view = viewport()
     const anchor = rect(button)
     panel.style.width = `${Math.max(1, Math.min(340, view.width - PAD * 2))}px`
-    panel.style.maxHeight = `${Math.max(1, Math.min(480, view.height - PAD * 2))}px`
-    const size = rect(panel)
-    const x = Math.max(PAD, Math.min(anchor.x, view.width - size.width - PAD))
-    const preferredY = anchor.y - size.height - 12
-    const y = Math.max(PAD, Math.min(preferredY >= PAD ? preferredY : anchor.y + anchor.height + 12, view.height - size.height - PAD))
-    panel.style.left = `${x - anchor.x}px`
-    panel.style.top = `${y - anchor.y}px`
+    const availableHeight = placement === 'top_bar'
+      ? Math.max(view.height - anchor.y - anchor.height - PAD * 2, anchor.y - PAD * 2)
+      : view.height - PAD * 2
+    const maxHeight = Math.max(1, Math.min(480, availableHeight))
+    panel.style.maxHeight = `${maxHeight}px`
+    const measured = rect(panel)
+    const width = Math.max(1, Math.min(340, view.width - PAD * 2))
+    const height = Math.max(1, Math.min(measured.height, maxHeight))
+    const x = Math.max(PAD, Math.min(anchor.x, view.width - width - PAD))
+    const above = anchor.y - height - PAD
+    const below = anchor.y + anchor.height + PAD
+    const preferredY = placement === 'top_bar'
+      ? (below + height <= view.height - PAD ? below : above)
+      : (above >= PAD ? above : below)
+    const y = Math.max(PAD, Math.min(preferredY, view.height - height - PAD))
+    if (placement === 'top_bar' && popup) {
+      const nextRect = `${x},${y},${width},${height}`
+      if (popupRect !== nextRect) {
+        popup.setSize(width, height)
+        popup.moveTo(x, y)
+        popupRect = nextRect
+      }
+      // Follow host layout changes only while the top-bar list is open.
+      positionFrame = requestAnimationFrame(() => {
+        if (!button.isConnected) setOpen(false)
+        else positionPanel()
+      })
+    } else {
+      panel.style.left = `${x - anchor.x}px`
+      panel.style.top = `${y - anchor.y}px`
+    }
   }
 
   function schedulePosition() {
@@ -100,14 +130,54 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   }
 
   function setOpen(next: boolean, restoreFocus = false) {
-    open = next && model.chatId !== null
+    open = next && model.chatId !== null && button.isConnected
+    cancelAnimationFrame(positionFrame)
+    if (open && placement === 'top_bar') {
+      // A separate host surface escapes the chat's clipping without changing
+      // the saved position of the floating globe.
+      if (!popup) {
+        const popupOptions: FloatOptions = {
+          width: 340, height: 120, chromeless: true, snapToEdge: false,
+          persistGeometry: false, resizable: false,
+        }
+        popup = ctx.ui.createFloatWidget(popupOptions)
+        popup.root.classList.add('wiv-root', 'wiv-popup')
+        popup.root.lang = 'en'
+      }
+      panel.style.left = '0px'
+      panel.style.top = '0px'
+      popup.root.append(panel)
+      popupRect = ''
+    }
+    popup?.setVisible(open && placement === 'top_bar')
     panel.hidden = !open
     button.setAttribute('aria-expanded', String(open))
     if (open) {
-      positionPanel()
+      if (placement === 'floating') positionPanel()
       schedulePosition()
       panel.focus({ preventScroll: true })
     } else if (restoreFocus && button.isConnected) button.focus({ preventScroll: true })
+  }
+
+  function applyPlacement(next: IconPlacement) {
+    if (disposed || placement === next) return
+    setOpen(false)
+    if (drag && button.hasPointerCapture?.(drag.pointerId)) button.releasePointerCapture(drag.pointerId)
+    drag = null
+    suppressClickUntil = 0
+    button.classList.remove('wiv-dragging')
+    if (next === 'top_bar') {
+      if (!toolbarRoot) {
+        toolbarRoot = ctx.ui.mount('chat_top_dock') as HTMLElement
+        toolbarRoot.classList.add('wiv-root', 'wiv-toolbar')
+        toolbarRoot.lang = 'en'
+      }
+      toolbarRoot.append(button)
+    } else {
+      root.append(button, panel)
+    }
+    placement = next
+    render()
   }
 
   function render() {
@@ -116,7 +186,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
     badge.textContent = count ? String(count) : ''
     const label = count ? `World Info: ${count} active ${count === 1 ? 'entry' : 'entries'}` : 'World Info'
     button.setAttribute('aria-label', label)
-    button.title = `${label} — click to view, drag to move`
+    button.title = `${label} — click to view${placement === 'floating' ? ', drag to move' : ''}`
     list.replaceChildren()
     if (!count) {
       const empty = document.createElement('div')
@@ -154,7 +224,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
         list.append(section)
       }
     }
-    widget.setVisible(model.chatId !== null)
+    widget.setVisible(model.chatId !== null && placement === 'floating')
+    if (toolbarRoot) toolbarRoot.hidden = model.chatId === null || placement !== 'top_bar'
     if (!model.chatId) setOpen(false)
     if (open) schedulePosition()
   }
@@ -166,7 +237,7 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   listen(button, 'pointerdown', event => {
     const pointer = event as PointerEvent
     event.stopPropagation()
-    if (pointer.button !== 0) return
+    if (pointer.button !== 0 || placement !== 'floating') return
     const origin = widget.getPosition()
     drag = { pointerId: pointer.pointerId, x: layoutPx(pointer.clientX), y: layoutPx(pointer.clientY), originX: origin.x, originY: origin.y, moved: false }
     button.setPointerCapture?.(pointer.pointerId)
@@ -207,7 +278,8 @@ export function setup(ctx: SpindleFrontendContext): () => void {
   listen(panel, 'pointerup', event => event.stopPropagation())
   listen(panel, 'click', event => event.stopPropagation())
   listen(document, 'pointerdown', event => {
-    if (open && !event.composedPath().includes(root)) setOpen(false)
+    const path = event.composedPath()
+    if (open && !path.includes(button) && !path.includes(panel)) setOpen(false)
   }, { capture: true })
   listen(document, 'keydown', event => {
     if (open && (event as KeyboardEvent).key === 'Escape') {
@@ -230,13 +302,18 @@ export function setup(ctx: SpindleFrontendContext): () => void {
       try { dispose() } catch { /* Permission revocation can close host handles first. */ }
     }
     root.replaceChildren()
+    toolbarRoot?.replaceChildren()
+    toolbarRoot?.classList.remove('wiv-root', 'wiv-toolbar')
+    if (toolbarRoot) toolbarRoot.hidden = false
+    popup?.root.replaceChildren()
+    popup?.destroy()
     widget.destroy()
   }
 
   try {
     disposers.push(ctx.dom.addStyle(styles))
     applySize(MAX_GLOBE_SIZE)
-    disposers.push(mountSizeSettings(ctx, applySize))
+    disposers.push(mountSizeSettings(ctx, applySize, applyPlacement))
     const changeChat = (value: unknown) => {
       const chatId = value && typeof value === 'object' ? (value as { chatId?: unknown }).chatId : null
       if (model.switchChat(typeof chatId === 'string' ? chatId : null)) {

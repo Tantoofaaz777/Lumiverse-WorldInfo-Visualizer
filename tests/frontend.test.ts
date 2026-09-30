@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { Window } from 'happy-dom'
-import type { SpindleFrontendContext, SpindleRangeSliderOptions } from 'lumiverse-spindle-types'
+import type { SpindleFrontendContext, SpindleRangeSliderOptions, SpindleSelectOptions } from 'lumiverse-spindle-types'
 import { setup } from '../src/frontend'
 import { GLOBE_SIZE_KEY } from '../src/size-settings'
+import { ICON_PLACEMENT_KEY } from '../src/placement-settings'
 
 let window: Window
 let cleanup: (() => void) | undefined
@@ -22,6 +23,16 @@ let sliderDestroyed: number
 let settingsListeners: Set<(value: unknown) => void>
 let savedSizes: Array<{ key: string; value: unknown }>
 let readSize: () => Promise<unknown>
+let toolbarRoot: HTMLElement
+let selectOptions: SpindleSelectOptions
+let selectDestroyed: number
+let placementListeners: Set<(value: unknown) => void>
+let readPlacement: () => Promise<unknown>
+let popupRoot: HTMLElement | undefined
+let popupPosition: { x: number; y: number }
+let popupDimensions: { width: number; height: number }
+let popupVisible: boolean
+let popupDestroyed: number
 
 function emit(event: string, payload: unknown) {
   for (const listener of events.get(event) ?? []) listener(payload)
@@ -59,6 +70,16 @@ beforeEach(() => {
   settingsListeners = new Set()
   savedSizes = []
   readSize = async () => undefined
+  toolbarRoot = document.createElement('div')
+  document.body.append(toolbarRoot)
+  selectDestroyed = 0
+  placementListeners = new Set()
+  readPlacement = async () => undefined
+  popupRoot = undefined
+  popupPosition = { x: 0, y: 0 }
+  popupDimensions = { width: 340, height: 120 }
+  popupVisible = false
+  popupDestroyed = 0
   const ctx = {
     getActiveChat: () => ({ chatId, characterId: null }),
     state: {
@@ -75,14 +96,15 @@ beforeEach(() => {
     } },
     worldBooks: { entries: (bookId: string) => fetchBookEntries(bookId) },
     settings: {
-      get: () => readSize(),
+      get: (key: string) => key === GLOBE_SIZE_KEY ? readSize() : readPlacement(),
       set: async (key: string, value: unknown) => {
         savedSizes.push({ key, value })
-        for (const listener of settingsListeners) listener(value)
+        for (const listener of key === GLOBE_SIZE_KEY ? settingsListeners : placementListeners) listener(value)
       },
-      watch: (_key: string, listener: (value: unknown) => void) => {
-        settingsListeners.add(listener)
-        return () => { settingsListeners.delete(listener) }
+      watch: (key: string, listener: (value: unknown) => void) => {
+        const listeners = key === GLOBE_SIZE_KEY ? settingsListeners : placementListeners
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
       },
     },
     components: { mountRangeSlider: (_target: Element, options: SpindleRangeSliderOptions) => {
@@ -90,6 +112,12 @@ beforeEach(() => {
       return {
         update: (next: Partial<SpindleRangeSliderOptions>) => { Object.assign(sliderOptions, next) },
         destroy: () => { sliderDestroyed++ },
+      }
+    }, mountSelect: (_target: Element, options: SpindleSelectOptions) => {
+      selectOptions = options
+      return {
+        update: (next: Partial<SpindleSelectOptions>) => { Object.assign(selectOptions, next) },
+        destroy: () => { selectDestroyed++ },
       }
     } },
     dom: { addStyle: (css: string) => {
@@ -99,6 +127,7 @@ beforeEach(() => {
       return () => style.remove()
     } },
     ui: { mount: (point: string) => {
+      if (point === 'chat_top_dock') return toolbarRoot
       expect(point).toBe('settings_extensions')
       settingsRoot.replaceChildren()
       return settingsRoot
@@ -109,14 +138,28 @@ beforeEach(() => {
         const { x, y, width, height } = element.getBoundingClientRect()
         return { x, y, width, height }
       },
-    }, createFloatWidget: () => ({
+    }, createFloatWidget: (options: { persistGeometry?: string | false }) => {
+      if (options.persistGeometry === false) {
+        popupRoot = document.createElement('div')
+        document.body.append(popupRoot)
+        const popupElement = popupRoot
+        return {
+          root: popupElement, widgetId: 'test-popup',
+          getPosition: () => popupPosition,
+          moveTo: (x: number, y: number) => { popupPosition = { x, y } },
+          setSize: (width: number, height: number) => { popupDimensions = { width, height } },
+          setVisible: (value: boolean) => { popupVisible = value },
+          destroy: () => { popupDestroyed++; popupElement.remove() },
+        }
+      }
+      return {
       root, widgetId: 'test-widget',
       getPosition: () => position,
       moveTo: (x: number, y: number) => { position = { x, y } },
       setSize: (width: number, height: number) => { dimensions = { width, height } },
       setVisible: (value: boolean) => { visibility = value },
       destroy: () => { destroyed++; root.remove() },
-    }) },
+    } } },
   } as unknown as SpindleFrontendContext
   hostContext = ctx
   cleanup = setup(ctx)
@@ -125,6 +168,137 @@ beforeEach(() => {
 afterEach(() => { cleanup?.(); cleanup = undefined; window.close() })
 
 describe('frontend behavior with a Spindle host double', () => {
+  test('placement switches preserve the snapshot, floating size and saved position', async () => {
+    await Bun.sleep(1)
+    emit('WORLD_INFO_ACTIVATED', { chatId, entries })
+    sliderOptions.onCommit!(36)
+    position = { x: 120, y: 450 }
+    const button = root.querySelector('button') as HTMLButtonElement
+    const panel = root.querySelector('.wiv-panel') as HTMLElement
+    button.click()
+    expect(selectOptions.options?.map(option => option.label)).toEqual(['Floating', 'Top bar'])
+    selectOptions.onChange!('top_bar')
+    expect(toolbarRoot.querySelector('button')).toBe(button)
+    expect(panel.hidden).toBe(true)
+    expect(button.title).not.toContain('drag')
+    expect(visibility).toBe(false)
+    expect(sliderOptions.disabled).toBe(true)
+    expect(button.querySelector('.wiv-badge')!.textContent).toBe('3')
+    selectOptions.onChange!('floating')
+    expect(root.querySelector('button')).toBe(button)
+    expect(visibility).toBe(true)
+    expect(toolbarRoot.hidden).toBe(true)
+    expect(sliderOptions.disabled).toBe(false)
+    expect(dimensions.width).toBe(36)
+    expect(position).toEqual({ x: 120, y: 450 })
+    expect(root.querySelectorAll('.wiv-entry')).toHaveLength(3)
+    await Bun.sleep(1)
+    expect(savedSizes.filter(row => row.key === ICON_PLACEMENT_KEY).map(row => row.value)).toEqual(['top_bar', 'floating'])
+  })
+  test('top-bar popup uses a separate surface below the anchor and remains within the viewport', async () => {
+    await Bun.sleep(1)
+    selectOptions.onChange!('top_bar')
+    const button = toolbarRoot.querySelector('button') as HTMLButtonElement
+    const panel = root.querySelector('.wiv-panel') as HTMLElement
+    button.getBoundingClientRect = () => new window.DOMRect(850, 20, 28, 28) as unknown as DOMRect
+    panel.getBoundingClientRect = () => new window.DOMRect(0, 0, 340, 300) as unknown as DOMRect
+    const floatingPosition = { ...position }
+    button.click()
+    await Bun.sleep(30)
+    expect(popupVisible).toBe(true)
+    expect(popupRoot!.querySelector('.wiv-panel')).toBe(panel)
+    expect(popupPosition).toEqual({ x: 548, y: 60 })
+    expect(popupDimensions).toEqual({ width: 340, height: 300 })
+    expect(position).toEqual(floatingPosition)
+    button.getBoundingClientRect = () => new window.DOMRect(100, 600, 28, 28) as unknown as DOMRect
+    window.dispatchEvent(new window.Event('resize'))
+    await Bun.sleep(30)
+    expect(popupPosition).toEqual({ x: 100, y: 288 })
+    panel.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true }) as unknown as Event)
+    expect(panel.hidden).toBe(false)
+    window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(popupVisible).toBe(false)
+    expect(window.document.activeElement).toBe(button as unknown as typeof window.document.activeElement)
+    button.click()
+    document.body.dispatchEvent(new window.PointerEvent('pointerdown', { bubbles: true }) as unknown as Event)
+    expect(panel.hidden).toBe(true)
+    expect(popupVisible).toBe(false)
+  })
+  test('top-bar buttons cannot drag and continue receiving generation and chat changes', async () => {
+    await Bun.sleep(1)
+    selectOptions.onChange!('top_bar')
+    const button = toolbarRoot.querySelector('button') as HTMLButtonElement
+    const previousPosition = { ...position }
+    button.dispatchEvent(new window.PointerEvent('pointerdown', { pointerId: 1, button: 0, clientX: 40, clientY: 30, bubbles: true }) as unknown as Event)
+    button.dispatchEvent(new window.PointerEvent('pointermove', { pointerId: 1, clientX: 180, clientY: 180, bubbles: true }) as unknown as Event)
+    button.dispatchEvent(new window.PointerEvent('pointerup', { pointerId: 1, bubbles: true }) as unknown as Event)
+    expect(position).toEqual(previousPosition)
+    emit('WORLD_INFO_ACTIVATED', { chatId, entries })
+    expect(button.querySelector('.wiv-badge')!.textContent).toBe('3')
+    button.click()
+    chat('chat-b')
+    expect(popupVisible).toBe(false)
+    expect(popupRoot!.querySelectorAll('.wiv-entry')).toHaveLength(0)
+    expect((button.querySelector('.wiv-badge') as HTMLElement).hidden).toBe(true)
+    chat(null)
+    expect(toolbarRoot.hidden).toBe(true)
+    expect(visibility).toBe(false)
+    chat('chat-c')
+    expect(toolbarRoot.hidden).toBe(false)
+    expect(visibility).toBe(false)
+  })
+  test('saved placement restores independently of size and invalid values fall back to Floating', async () => {
+    cleanup!()
+    document.body.append(root)
+    readSize = async () => 40
+    readPlacement = async () => 'top_bar'
+    cleanup = setup(hostContext)
+    await Bun.sleep(1)
+    expect(toolbarRoot.querySelector('.wiv-trigger')).not.toBeNull()
+    expect(dimensions.width).toBe(40)
+    expect(selectOptions.value).toBe('top_bar')
+    expect(sliderOptions.disabled).toBe(true)
+    for (const listener of placementListeners) listener('invalid')
+    expect(visibility).toBe(true)
+    expect(selectOptions.value).toBe('floating')
+    expect(dimensions.width).toBe(40)
+  })
+  test('a late placement read cannot undo a choice and teardown removes both surfaces', async () => {
+    cleanup!()
+    document.body.append(root)
+    let resolveRead!: (value: unknown) => void
+    readPlacement = () => new Promise(resolve => { resolveRead = resolve })
+    cleanup = setup(hostContext)
+    selectOptions.onChange!('top_bar')
+    resolveRead('floating')
+    await Bun.sleep(1)
+    expect(selectOptions.value).toBe('top_bar')
+    ;(toolbarRoot.querySelector('button') as HTMLButtonElement).click()
+    cleanup!()
+    cleanup!()
+    expect(popupDestroyed).toBe(1)
+    expect(toolbarRoot.children).toHaveLength(0)
+    expect(popupRoot!.children).toHaveLength(0)
+    expect(placementListeners.size).toBe(0)
+    const savedCount = savedSizes.length
+    selectOptions.onChange!('floating')
+    await Bun.sleep(1)
+    expect(savedSizes).toHaveLength(savedCount)
+  })
+  test('host remounts keep the top-bar button and a detached anchor closes the popup', async () => {
+    await Bun.sleep(1)
+    selectOptions.onChange!('top_bar')
+    emit('WORLD_INFO_ACTIVATED', { chatId, entries })
+    const button = toolbarRoot.querySelector('button') as HTMLButtonElement
+    button.click()
+    toolbarRoot.remove()
+    await Bun.sleep(30)
+    expect(popupVisible).toBe(false)
+    document.body.append(toolbarRoot)
+    expect(button.querySelector('.wiv-badge')!.textContent).toBe('3')
+    button.click()
+    expect(popupVisible).toBe(true)
+  })
   test('native slider resizes live and saves only on commit', async () => {
     await Bun.sleep(1)
     expect(sliderOptions.min).toBe(32)

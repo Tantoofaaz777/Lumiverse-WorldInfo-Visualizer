@@ -1,4 +1,5 @@
 import type { SpindleFrontendContext } from 'lumiverse-spindle-types'
+import { mountPlacementSettings, type IconPlacement } from './placement-settings'
 
 export const MIN_GLOBE_SIZE = 32
 export const MAX_GLOBE_SIZE = 52
@@ -9,7 +10,7 @@ export function globeSize(value: unknown): number {
     ? Math.max(MIN_GLOBE_SIZE, Math.min(MAX_GLOBE_SIZE, Math.round(value))) : MAX_GLOBE_SIZE
 }
 
-export function mountSizeSettings(ctx: SpindleFrontendContext, applySize: (size: number) => void): () => void {
+export function mountSizeSettings(ctx: SpindleFrontendContext, applySize: (size: number) => void, applyPlacement: (placement: IconPlacement) => void): () => void {
   const settings = ctx.settings
   if (!settings || typeof ctx.ui.mount !== 'function' || typeof ctx.components?.mountRangeSlider !== 'function') {
     console.warn('[World Info Visualizer] Native size settings are unavailable in this Lumiverse build.')
@@ -24,11 +25,12 @@ export function mountSizeSettings(ctx: SpindleFrontendContext, applySize: (size:
   const status = document.createElement('p')
   status.className = 'wiv-setting-status'
   status.setAttribute('role', 'status')
-  root.append(title, target, status)
+  root.append(title)
 
   let disposed = false
   let revision = 0
   let dragging = false
+  let topBar = false
   let committed = MAX_GLOBE_SIZE
   let pendingWrites = 0
   let writes = Promise.resolve()
@@ -38,13 +40,13 @@ export function mountSizeSettings(ctx: SpindleFrontendContext, applySize: (size:
     min: MIN_GLOBE_SIZE, max: MAX_GLOBE_SIZE, step: 1, integer: true,
     value: committed, format: { suffix: ' px' },
     onDragValue(value) {
-      if (disposed) return
+      if (disposed || topBar) return
       revision++
       dragging = value !== null
       applySize(value === null ? committed : globeSize(value))
     },
     onCommit(value) {
-      if (disposed) return
+      if (disposed || topBar) return
       const size = globeSize(value)
       const writeRevision = ++revision
       dragging = false
@@ -65,6 +67,14 @@ export function mountSizeSettings(ctx: SpindleFrontendContext, applySize: (size:
       }).finally(() => { pendingWrites-- })
     },
   })
+  const disposePlacement = mountPlacementSettings(ctx, root, placement => {
+    topBar = placement === 'top_bar'
+    dragging = false
+    applySize(committed)
+    slider.update({ disabled: topBar })
+    applyPlacement(placement)
+  })
+  root.append(target, status)
   const receive = (value: unknown) => {
     committed = globeSize(value)
     applySize(committed)
@@ -84,6 +94,7 @@ export function mountSizeSettings(ctx: SpindleFrontendContext, applySize: (size:
   })
   return () => {
     disposed = true
+    disposePlacement()
     unwatch()
     slider.destroy()
     root.replaceChildren()

@@ -1,11 +1,11 @@
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "World Info Visualizer",
   "identifier": "world_info_visualizer",
   "author": "Tantoofaaz777",
   "github": "https://github.com/Tantoofaaz777/Lumiverse-WorldInfo-Visualizer",
   "homepage": "https://github.com/Tantoofaaz777/Lumiverse-WorldInfo-Visualizer",
-  "description": "A floating globe showing the latest generation's active World Info entries, grouped by lorebook.",
+  "description": "See the latest generation's active World Info entries, grouped by lorebook, from a floating globe or the chat top bar.",
   "dev_mode": false,
   "permissions": ["ui_panels", "generation"],
   "entry_frontend": "dist/frontend.js",

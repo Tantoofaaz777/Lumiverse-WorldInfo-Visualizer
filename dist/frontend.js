@@ -206,6 +206,15 @@ var styles = `
 .wiv-settings h3 { margin: 0 0 16px; font: inherit; font-weight: 600; }
 .wiv-setting-status { margin: 8px 0 0; color: var(--lumiverse-text-muted, GrayText); font-size: 12px; }
 .wiv-setting-status:empty { display: none; }
+.wiv-placement-setting { margin-bottom: 16px; }
+.wiv-setting-label { margin-bottom: 8px; font-size: calc(13px * var(--lumiverse-font-scale, 1)); }
+.wiv-root.wiv-toolbar { display: inline-flex !important; align-items: center; width: auto !important; height: 28px; min-width: 0 !important; flex: 0 0 auto !important; order: 2; --wiv-size: 28px; --wiv-globe-size: 14px; --wiv-badge-size: 14px; --wiv-badge-font-size: 9px; }
+.wiv-root.wiv-toolbar[hidden] { display: none !important; }
+.wiv-toolbar .wiv-trigger { border-radius: 6px; background: transparent; border-color: transparent; box-shadow: none; color: var(--lumiverse-text-muted, GrayText); touch-action: auto; }
+.wiv-toolbar .wiv-trigger:hover, .wiv-toolbar .wiv-trigger[aria-expanded="true"] { background: var(--lumiverse-bg-hover, Canvas); color: var(--lumiverse-primary, Highlight); }
+.wiv-toolbar .wiv-badge { right: -4px; bottom: -3px; border-width: 1px; padding: 0 3px; }
+.wiv-root.wiv-popup { width: 100%; height: auto; }
+.wiv-popup .wiv-panel { position: relative; }
 @media (prefers-reduced-motion: reduce) { .wiv-trigger { transition: none; } }
 `;
 
@@ -252,6 +261,85 @@ function watchActiveChat(ctx, change) {
   };
 }
 
+// src/placement-settings.ts
+var ICON_PLACEMENT_KEY = "ui:icon_placement";
+var iconPlacement = (value) => value === "top_bar" ? "top_bar" : "floating";
+function mountPlacementSettings(ctx, root, apply) {
+  const settings = ctx.settings;
+  if (!settings || typeof ctx.components?.mountSelect !== "function")
+    return () => {};
+  const field = document.createElement("div");
+  field.className = "wiv-placement-setting";
+  const label = document.createElement("div");
+  label.className = "wiv-setting-label";
+  label.textContent = "Icon placement";
+  const target = document.createElement("div");
+  const status = document.createElement("p");
+  status.className = "wiv-setting-status";
+  status.setAttribute("role", "status");
+  field.append(label, target, status);
+  root.append(field);
+  let disposed = false;
+  let revision = 0;
+  let pending = 0;
+  let writes = Promise.resolve();
+  const select = ctx.components.mountSelect(target, {
+    ariaLabel: "Icon placement",
+    value: "floating",
+    options: [{ value: "floating", label: "Floating" }, { value: "top_bar", label: "Top bar" }],
+    onChange(value) {
+      if (disposed)
+        return;
+      const placement = iconPlacement(value);
+      const writeRevision = ++revision;
+      receive(placement);
+      pending++;
+      status.textContent = "Saving…";
+      writes = writes.then(async () => {
+        if (disposed)
+          return;
+        try {
+          await settings.set(ICON_PLACEMENT_KEY, placement);
+          if (!disposed && revision === writeRevision)
+            status.textContent = "";
+        } catch (error) {
+          if (!disposed && revision === writeRevision)
+            status.textContent = "Could not save icon placement. Try again.";
+          console.warn("[World Info Visualizer] Could not save icon placement:", error);
+        }
+      }).finally(() => {
+        pending--;
+      });
+    }
+  });
+  function receive(value) {
+    const placement = iconPlacement(value);
+    apply(placement);
+    select.update({ value: placement });
+  }
+  const unwatch = settings.watch(ICON_PLACEMENT_KEY, (value) => {
+    if (disposed || pending)
+      return;
+    revision++;
+    receive(value);
+  });
+  const readRevision = revision;
+  settings.get(ICON_PLACEMENT_KEY).then((value) => {
+    if (!disposed && revision === readRevision)
+      receive(value);
+  }).catch((error) => {
+    if (!disposed && revision === readRevision)
+      status.textContent = "Could not load icon placement. Using Floating.";
+    console.warn("[World Info Visualizer] Could not load icon placement:", error);
+  });
+  return () => {
+    disposed = true;
+    unwatch();
+    select.destroy();
+    field.remove();
+  };
+}
+
 // src/size-settings.ts
 var MIN_GLOBE_SIZE = 32;
 var MAX_GLOBE_SIZE = 52;
@@ -259,7 +347,7 @@ var GLOBE_SIZE_KEY = "ui:globe_size";
 function globeSize(value) {
   return typeof value === "number" && Number.isFinite(value) ? Math.max(MIN_GLOBE_SIZE, Math.min(MAX_GLOBE_SIZE, Math.round(value))) : MAX_GLOBE_SIZE;
 }
-function mountSizeSettings(ctx, applySize) {
+function mountSizeSettings(ctx, applySize, applyPlacement) {
   const settings = ctx.settings;
   if (!settings || typeof ctx.ui.mount !== "function" || typeof ctx.components?.mountRangeSlider !== "function") {
     console.warn("[World Info Visualizer] Native size settings are unavailable in this Lumiverse build.");
@@ -274,10 +362,11 @@ function mountSizeSettings(ctx, applySize) {
   const status = document.createElement("p");
   status.className = "wiv-setting-status";
   status.setAttribute("role", "status");
-  root.append(title, target, status);
+  root.append(title);
   let disposed = false;
   let revision = 0;
   let dragging = false;
+  let topBar = false;
   let committed = MAX_GLOBE_SIZE;
   let pendingWrites = 0;
   let writes = Promise.resolve();
@@ -291,14 +380,14 @@ function mountSizeSettings(ctx, applySize) {
     value: committed,
     format: { suffix: " px" },
     onDragValue(value) {
-      if (disposed)
+      if (disposed || topBar)
         return;
       revision++;
       dragging = value !== null;
       applySize(value === null ? committed : globeSize(value));
     },
     onCommit(value) {
-      if (disposed)
+      if (disposed || topBar)
         return;
       const size = globeSize(value);
       const writeRevision = ++revision;
@@ -324,6 +413,14 @@ function mountSizeSettings(ctx, applySize) {
       });
     }
   });
+  const disposePlacement = mountPlacementSettings(ctx, root, (placement) => {
+    topBar = placement === "top_bar";
+    dragging = false;
+    applySize(committed);
+    slider.update({ disabled: topBar });
+    applyPlacement(placement);
+  });
+  root.append(target, status);
   const receive = (value) => {
     committed = globeSize(value);
     applySize(committed);
@@ -346,6 +443,7 @@ function mountSizeSettings(ctx, applySize) {
   });
   return () => {
     disposed = true;
+    disposePlacement();
     unwatch();
     slider.destroy();
     root.replaceChildren();
@@ -364,6 +462,10 @@ function setup(ctx) {
   let positionFrame = 0;
   let syncActiveChat = () => {};
   let size = MAX_GLOBE_SIZE;
+  let placement = "floating";
+  let toolbarRoot = null;
+  let popup = null;
+  let popupRect = "";
   const geometry = ctx.ui.geometry;
   const viewport = () => geometry?.layoutViewportSize() ?? { width: window.innerWidth, height: window.innerHeight };
   const layoutPx = (value) => geometry?.toLayoutPx(value) ?? value;
@@ -408,18 +510,43 @@ function setup(ctx) {
     disposers.push(() => target.removeEventListener(event, handler, options));
   }
   function positionPanel() {
-    if (disposed || !open || !button.isConnected)
+    if (disposed || !open)
       return;
+    if (!button.isConnected) {
+      setOpen(false);
+      return;
+    }
     const view = viewport();
     const anchor = rect(button);
     panel.style.width = `${Math.max(1, Math.min(340, view.width - PAD * 2))}px`;
-    panel.style.maxHeight = `${Math.max(1, Math.min(480, view.height - PAD * 2))}px`;
-    const size = rect(panel);
-    const x = Math.max(PAD, Math.min(anchor.x, view.width - size.width - PAD));
-    const preferredY = anchor.y - size.height - 12;
-    const y = Math.max(PAD, Math.min(preferredY >= PAD ? preferredY : anchor.y + anchor.height + 12, view.height - size.height - PAD));
-    panel.style.left = `${x - anchor.x}px`;
-    panel.style.top = `${y - anchor.y}px`;
+    const availableHeight = placement === "top_bar" ? Math.max(view.height - anchor.y - anchor.height - PAD * 2, anchor.y - PAD * 2) : view.height - PAD * 2;
+    const maxHeight = Math.max(1, Math.min(480, availableHeight));
+    panel.style.maxHeight = `${maxHeight}px`;
+    const measured = rect(panel);
+    const width = Math.max(1, Math.min(340, view.width - PAD * 2));
+    const height = Math.max(1, Math.min(measured.height, maxHeight));
+    const x = Math.max(PAD, Math.min(anchor.x, view.width - width - PAD));
+    const above = anchor.y - height - PAD;
+    const below = anchor.y + anchor.height + PAD;
+    const preferredY = placement === "top_bar" ? below + height <= view.height - PAD ? below : above : above >= PAD ? above : below;
+    const y = Math.max(PAD, Math.min(preferredY, view.height - height - PAD));
+    if (placement === "top_bar" && popup) {
+      const nextRect = `${x},${y},${width},${height}`;
+      if (popupRect !== nextRect) {
+        popup.setSize(width, height);
+        popup.moveTo(x, y);
+        popupRect = nextRect;
+      }
+      positionFrame = requestAnimationFrame(() => {
+        if (!button.isConnected)
+          setOpen(false);
+        else
+          positionPanel();
+      });
+    } else {
+      panel.style.left = `${x - anchor.x}px`;
+      panel.style.top = `${y - anchor.y}px`;
+    }
   }
   function schedulePosition() {
     cancelAnimationFrame(positionFrame);
@@ -441,15 +568,59 @@ function setup(ctx) {
       schedulePosition();
   }
   function setOpen(next, restoreFocus = false) {
-    open = next && model.chatId !== null;
+    open = next && model.chatId !== null && button.isConnected;
+    cancelAnimationFrame(positionFrame);
+    if (open && placement === "top_bar") {
+      if (!popup) {
+        const popupOptions = {
+          width: 340,
+          height: 120,
+          chromeless: true,
+          snapToEdge: false,
+          persistGeometry: false,
+          resizable: false
+        };
+        popup = ctx.ui.createFloatWidget(popupOptions);
+        popup.root.classList.add("wiv-root", "wiv-popup");
+        popup.root.lang = "en";
+      }
+      panel.style.left = "0px";
+      panel.style.top = "0px";
+      popup.root.append(panel);
+      popupRect = "";
+    }
+    popup?.setVisible(open && placement === "top_bar");
     panel.hidden = !open;
     button.setAttribute("aria-expanded", String(open));
     if (open) {
-      positionPanel();
+      if (placement === "floating")
+        positionPanel();
       schedulePosition();
       panel.focus({ preventScroll: true });
     } else if (restoreFocus && button.isConnected)
       button.focus({ preventScroll: true });
+  }
+  function applyPlacement(next) {
+    if (disposed || placement === next)
+      return;
+    setOpen(false);
+    if (drag && button.hasPointerCapture?.(drag.pointerId))
+      button.releasePointerCapture(drag.pointerId);
+    drag = null;
+    suppressClickUntil = 0;
+    button.classList.remove("wiv-dragging");
+    if (next === "top_bar") {
+      if (!toolbarRoot) {
+        toolbarRoot = ctx.ui.mount("chat_top_dock");
+        toolbarRoot.classList.add("wiv-root", "wiv-toolbar");
+        toolbarRoot.lang = "en";
+      }
+      toolbarRoot.append(button);
+    } else {
+      root.append(button, panel);
+    }
+    placement = next;
+    render();
   }
   function render() {
     const count = model.entries.length;
@@ -457,7 +628,7 @@ function setup(ctx) {
     badge.textContent = count ? String(count) : "";
     const label = count ? `World Info: ${count} active ${count === 1 ? "entry" : "entries"}` : "World Info";
     button.setAttribute("aria-label", label);
-    button.title = `${label} — click to view, drag to move`;
+    button.title = `${label} — click to view${placement === "floating" ? ", drag to move" : ""}`;
     list.replaceChildren();
     if (!count) {
       const empty = document.createElement("div");
@@ -495,7 +666,9 @@ function setup(ctx) {
         list.append(section);
       }
     }
-    widget.setVisible(model.chatId !== null);
+    widget.setVisible(model.chatId !== null && placement === "floating");
+    if (toolbarRoot)
+      toolbarRoot.hidden = model.chatId === null || placement !== "top_bar";
     if (!model.chatId)
       setOpen(false);
     if (open)
@@ -506,7 +679,7 @@ function setup(ctx) {
   listen(button, "pointerdown", (event) => {
     const pointer = event;
     event.stopPropagation();
-    if (pointer.button !== 0)
+    if (pointer.button !== 0 || placement !== "floating")
       return;
     const origin = widget.getPosition();
     drag = { pointerId: pointer.pointerId, x: layoutPx(pointer.clientX), y: layoutPx(pointer.clientY), originX: origin.x, originY: origin.y, moved: false };
@@ -554,7 +727,8 @@ function setup(ctx) {
   listen(panel, "pointerup", (event) => event.stopPropagation());
   listen(panel, "click", (event) => event.stopPropagation());
   listen(document, "pointerdown", (event) => {
-    if (open && !event.composedPath().includes(root))
+    const path = event.composedPath();
+    if (open && !path.includes(button) && !path.includes(panel))
       setOpen(false);
   }, { capture: true });
   listen(document, "keydown", (event) => {
@@ -580,12 +754,18 @@ function setup(ctx) {
       } catch {}
     }
     root.replaceChildren();
+    toolbarRoot?.replaceChildren();
+    toolbarRoot?.classList.remove("wiv-root", "wiv-toolbar");
+    if (toolbarRoot)
+      toolbarRoot.hidden = false;
+    popup?.root.replaceChildren();
+    popup?.destroy();
     widget.destroy();
   };
   try {
     disposers.push(ctx.dom.addStyle(styles));
     applySize(MAX_GLOBE_SIZE);
-    disposers.push(mountSizeSettings(ctx, applySize));
+    disposers.push(mountSizeSettings(ctx, applySize, applyPlacement));
     const changeChat = (value) => {
       const chatId = value && typeof value === "object" ? value.chatId : null;
       if (model.switchChat(typeof chatId === "string" ? chatId : null)) {

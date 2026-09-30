@@ -45,5 +45,14 @@ export const styles = `
 .wiv-settings h3 { margin: 0 0 16px; font: inherit; font-weight: 600; }
 .wiv-setting-status { margin: 8px 0 0; color: var(--lumiverse-text-muted, GrayText); font-size: 12px; }
 .wiv-setting-status:empty { display: none; }
+.wiv-placement-setting { margin-bottom: 16px; }
+.wiv-setting-label { margin-bottom: 8px; font-size: calc(13px * var(--lumiverse-font-scale, 1)); }
+.wiv-root.wiv-toolbar { display: inline-flex !important; align-items: center; width: auto !important; height: 28px; min-width: 0 !important; flex: 0 0 auto !important; order: 2; --wiv-size: 28px; --wiv-globe-size: 14px; --wiv-badge-size: 14px; --wiv-badge-font-size: 9px; }
+.wiv-root.wiv-toolbar[hidden] { display: none !important; }
+.wiv-toolbar .wiv-trigger { border-radius: 6px; background: transparent; border-color: transparent; box-shadow: none; color: var(--lumiverse-text-muted, GrayText); touch-action: auto; }
+.wiv-toolbar .wiv-trigger:hover, .wiv-toolbar .wiv-trigger[aria-expanded="true"] { background: var(--lumiverse-bg-hover, Canvas); color: var(--lumiverse-primary, Highlight); }
+.wiv-toolbar .wiv-badge { right: -4px; bottom: -3px; border-width: 1px; padding: 0 3px; }
+.wiv-root.wiv-popup { width: 100%; height: auto; }
+.wiv-popup .wiv-panel { position: relative; }
 @media (prefers-reduced-motion: reduce) { .wiv-trigger { transition: none; } }
 `
