@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>World Info Visualizer · Preview</title>
+  <style>
+    :root { color-scheme: dark; --lumiverse-bg-opaque: #1c1826; --lumiverse-bg-hover: #2d283a; --lumiverse-border: #9370db20; --lumiverse-border-hover: #9370db50; --lumiverse-primary: #9370db; --lumiverse-primary-text: #ba87ff; --lumiverse-text: #ffffffe6; --lumiverse-text-muted: #ffffffa6; --lumiverse-text-dim: #ffffff66; --lumiverse-icon: #ffffffe6; --lumiverse-fill-hover: #0003; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.5 system-ui, sans-serif; color: var(--lumiverse-text); background: #121018; }
+    .light { color-scheme: light; background: #f4f1f9; --lumiverse-bg-opaque: #fff; --lumiverse-bg-hover: #f1ecf9; --lumiverse-text: #252032; --lumiverse-text-muted: #635b71; --lumiverse-text-dim: #857c92; --lumiverse-icon: #453454; --lumiverse-primary: #8056c0; --lumiverse-primary-text: #7344b7; --lumiverse-fill-hover: #8056c012; }
+    .topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 26px; border-bottom: 1px solid var(--lumiverse-border); background: var(--lumiverse-bg-opaque); }
+    .brand { font-weight: 650; } .tag { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--lumiverse-text-muted); margin-left: 10px; }
+    .controls { display: flex; flex-wrap: wrap; gap: 6px; }
+    .controls button { color: var(--lumiverse-text); background: transparent; border: 1px solid var(--lumiverse-border-hover); border-radius: 7px; padding: 7px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+    .controls button:hover { background: var(--lumiverse-bg-hover); }
+    main { max-width: 740px; margin: 8vh auto; padding: 24px; }
+    .eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--lumiverse-primary-text); }
+    h1 { font-size: clamp(23px, 4vw, 36px); font-weight: 600; letter-spacing: -.025em; margin: 10px 0 14px; }
+    .intro { color: var(--lumiverse-text-muted); max-width: 540px; }
+    .message { margin: 30px 0; border: 1px solid var(--lumiverse-border); border-radius: 12px; padding: 20px 24px; background: var(--lumiverse-bg-opaque); }
+    .message strong { display: block; font-size: 12px; color: var(--lumiverse-primary-text); margin-bottom: 8px; }
+    .hint { color: var(--lumiverse-text-dim); font-size: 12px; }
+    .preview-float { position: fixed; width: 52px; height: 52px; z-index: 9980; contain: layout style; overflow: visible; }
+    [hidden] { display: none !important; }
+    @media (max-width: 600px) { .topbar { padding: 14px 16px; } main { margin: 16px auto; } .message { margin-top: 20px; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div><span class="brand">World Info Visualizer</span><span class="tag">Local preview</span></div>
+    <nav class="controls" aria-label="Preview controls">
+      <button id="active">Active entries</button><button id="empty">Zero entries</button><button id="new-chat">Switch chat</button><button id="home">Home</button><button id="theme">Toggle theme</button><button id="restart">Reload extension</button>
+    </nav>
+  </header>
+  <main>
+    <div class="eyebrow" id="chat-label">Larkspur · Preview chat</div>
+    <h1>Your lore, at a glance.</h1>
+    <p class="intro">Click the floating globe to see the entries used in the latest generation, grouped by lorebook. Drag it wherever it feels comfortable.</p>
+    <article class="message"><strong>Mira</strong>The observatory lights flicker above Larkspur. At the Lantern Inn, the astronomers’ guild is gathering for the first time in years.</article>
+    <p class="hint">This preview uses sample events and the actual extension frontend. It does not connect to a model or modify any chats.</p>
+  </main>
+  <script type="module" src="/preview.js"></script>
+</body>
+</html>
